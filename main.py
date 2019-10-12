@@ -10,7 +10,7 @@ def main():
 
     hyper_params = {
         "learning_rate": 1,
-        "style_weight": 1000000,
+        "style_weight": 10000,
         "content_weight": 1,
         "n_steps": 300
     }
@@ -28,8 +28,8 @@ def main():
     content_images_dir = "content_images/"
     style_images_dir = "style_images/"
     output_images_dir = "output_images/"
-    content_image_name = "content_00.jpg"
-    style_image_name = "style_00.jpg"
+    content_image_name = "content_01.png"
+    style_image_name = "style_01.jpg"
     output_image_path = join(output_images_dir,
                              content_image_name.split('.')[0] + "_" + style_image_name.split('.')[0] + ".jpg")
     content_image_path = join(content_images_dir, content_image_name)

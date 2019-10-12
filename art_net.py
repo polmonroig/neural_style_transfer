@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 import copy
 
-
+# Content loss between two images is simply the Mean squared error
 class ContentLoss(nn.Module):
     def __init__(self, target):
         super(ContentLoss, self).__init__()
@@ -15,7 +15,8 @@ class ContentLoss(nn.Module):
         self.loss = F.mse_loss(input, self.target)
         return input
 
-
+# The style loss of an image depends on a more complex relationship
+# as the GRAM matrix 
 class StyleLoss(nn.Module):
 
     def __init__(self, target_feature):
@@ -23,8 +24,8 @@ class StyleLoss(nn.Module):
         self.target = StyleLoss.gram_matrix(target_feature).detach()
 
     def forward(self, input):
-        G = StyleLoss.gram_matrix(input)
-        self.loss = F.mse_loss(G, self.target)
+        mat = StyleLoss.gram_matrix(input)
+        self.loss = F.mse_loss(mat, self.target)
         return input
 
     @staticmethod
@@ -49,6 +50,7 @@ class Normalization(nn.Module):
 class ArtNet:
     def __init__(self, device):
         self.cnn = models.vgg19(pretrained=True).features.to(device).eval()
+        # the normalization mean and std are taken directly from the original paper
         self.normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
         self.normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
         self.content_layers = ['conv_4']
@@ -57,23 +59,15 @@ class ArtNet:
 
 
     @staticmethod
-    def get_input_optimizer(image, lr):
+    def get_optimizer(image, lr):
         optimizer = optim.LBFGS([image.requires_grad_()], lr=lr)
         return optimizer
 
-    def get_style_model_and_losses(self, style_image, content_image):
+    def get_losses(self, style_image, content_image):
         self.cnn = copy.deepcopy(self.cnn)
-
-        # normalization module
         normalization = Normalization(self.normalization_mean, self.normalization_std).to(self.device)
-
-        # just in order to have an iterable access to or list of content/syle
-        # losses
         content_losses = []
         style_losses = []
-
-        # assuming that cnn is a nn.Sequential, so we make a new nn.Sequential
-        # to put in modules that are supposed to be activated sequentially
         model = nn.Sequential(normalization)
 
         i = 0  # increment every time we see a conv
@@ -83,9 +77,6 @@ class ArtNet:
                 name = 'conv_{}'.format(i)
             elif isinstance(layer, nn.ReLU):
                 name = 'relu_{}'.format(i)
-                # The in-place version doesn't play very nicely with the ContentLoss
-                # and StyleLoss we insert below. So we replace with out-of-place
-                # ones here.
                 layer = nn.ReLU(inplace=False)
             elif isinstance(layer, nn.MaxPool2d):
                 name = 'pool_{}'.format(i)
@@ -119,18 +110,16 @@ class ArtNet:
         return model, style_losses, content_losses
 
     def train(self, content_weight, style_weight, n_steps, content_image, style_image, input_image, lr, experiment):
-        model, style_losses, content_losses = self.get_style_model_and_losses( style_image, content_image)
-        optimizer = ArtNet.get_input_optimizer(input_image, lr)
-
-        print('Optimizing..')
-        run = [0]
+        model, style_losses, content_losses = self.get_losses( style_image, content_image)
+        optimizer = ArtNet.get_optimizer(input_image, lr)
+        step = 0
         with experiment.train():
-            while run[0] <= n_steps:
+            while step <= n_steps:
 
+                # LBFGS optimizer requires a closure function since it
+                # needs to evaluate the function multiple times
                 def closure():
-                    # correct the values of updated input image
                     input_image.data.clamp_(0, 1)
-
                     optimizer.zero_grad()
                     model(input_image)
                     style_score = 0
@@ -147,9 +136,9 @@ class ArtNet:
                     loss = style_score + content_score
                     loss.backward()
 
-                    run[0] += 1
-                    if run[0] % 50 == 0:
-                        print("run {}:".format(run))
+                    step += 1
+                    if step % 50 == 0:
+                        print("run {}:".format(step))
                         experiment.log_metric("style_loss", style_score.item())
                         experiment.log_metric("content_loss", content_score.item())
                         print('Style Loss : {:4f} Content Loss: {:4f}'.format(
@@ -160,7 +149,6 @@ class ArtNet:
 
                 optimizer.step(closure)
 
-        # a last correction...
         input_image.data.clamp_(0, 1)
 
         return input_image
